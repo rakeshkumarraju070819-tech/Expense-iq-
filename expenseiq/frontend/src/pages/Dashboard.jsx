@@ -22,6 +22,17 @@ const fmt = (n) =>
     style: "currency", currency: "INR", maximumFractionDigits: 2,
   }).format(n || 0);
 
+const categoryColors = {
+  "Housing": "bg-emerald-100 text-emerald-600",
+  "Food": "bg-amber-100 text-amber-600",
+  "Transport": "bg-blue-100 text-blue-600",
+  "Utilities": "bg-pink-100 text-pink-600",
+  "Shopping": "bg-purple-100 text-purple-600",
+  "Personal": "bg-rose-100 text-rose-600",
+  "Default": "bg-indigo-100 text-indigo-600"
+};
+const getCatClass = (c) => categoryColors[c] || categoryColors["Default"];
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -30,6 +41,9 @@ export default function Dashboard() {
   const [showModal, setShowModal]     = useState(false);
   const [collapsed, setCollapsed]     = useState(false);
   const [activeRange, setActiveRange] = useState("Today");
+
+  const [isDeleteView, setIsDeleteView] = useState(false);
+  const [selectedIds, setSelectedIds]   = useState([]);
 
   // Load expenses for this user from localStorage
   useEffect(() => {
@@ -77,6 +91,27 @@ export default function Dashboard() {
     if (window.confirm("Delete all transactions? This cannot be undone.")) persist([]);
   };
 
+  const handleDeleteSelected = () => {
+    if (selectedIds.length === 0) return;
+    if (window.confirm("Are you sure you want to permanently delete selected transactions?")) {
+      persist(expenses.filter((e) => !selectedIds.includes(e.id)));
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSingleDelete = (id) => {
+    if (window.confirm("Are you sure you want to permanently delete this transaction?")) {
+      persist(expenses.filter((e) => e.id !== id));
+      setSelectedIds(orig => orig.filter(sid => sid !== id));
+    }
+  };
+
+  const toggleSelectAll = (e) => {
+    if (e.target.checked) setSelectedIds(expenses.map(exp => exp.id));
+    else setSelectedIds([]);
+  };
+
+
   const handleLogout = () => { logout(); navigate("/login"); };
 
   // ── Initials for sidebar user badge ──────────────────────────────────────
@@ -95,8 +130,12 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-2">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
-            <p className="text-sm text-gray-400 mt-0.5">{dateStr}</p>
+            <h1 className="text-2xl font-bold text-gray-800">
+              {isDeleteView ? "All Transactions" : "Dashboard"}
+            </h1>
+            <p className="text-sm text-gray-400 mt-0.5">
+              {isDeleteView ? "Manage and review your choices here" : dateStr}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-500 hidden sm:block">
@@ -105,7 +144,95 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="p-6 space-y-5">
+        {isDeleteView ? (
+          <div className="p-6 flex flex-col h-[calc(100vh-100px)]" style={{ animation: 'fadeIn 0.4s ease-in-out' }}>
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex-1 overflow-auto flex flex-col relative">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-gray-400 uppercase border-b border-gray-100 absolute top-0 bg-white w-full z-10" style={{ position: "sticky" }}>
+                  <tr>
+                    <th className="pb-3 pt-2 px-2 font-medium w-12 border-b border-gray-100">
+                      <input 
+                        type="checkbox" 
+                        onChange={toggleSelectAll} 
+                        checked={expenses.length > 0 && selectedIds.length === expenses.length}
+                        className="w-4 h-4 text-indigo-600 rounded bg-gray-100 border-gray-300 focus:ring-indigo-500 cursor-pointer" 
+                      />
+                    </th>
+                    <th className="pb-3 pt-2 px-4 font-medium border-b border-gray-100">Date</th>
+                    <th className="pb-3 pt-2 px-4 font-medium border-b border-gray-100">Category</th>
+                    <th className="pb-3 pt-2 px-4 font-medium border-b border-gray-100 w-1/3">Description</th>
+                    <th className="pb-3 pt-2 px-4 text-right font-medium border-b border-gray-100">Amount</th>
+                    <th className="pb-3 pt-2 px-4 text-center font-medium w-16 border-b border-gray-100">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expenses.map((exp) => (
+                    <tr 
+                      key={exp.id} 
+                      className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${
+                        selectedIds.includes(exp.id) ? 'bg-red-50/40 shadow-[inset_4px_0_0_0_rgba(239,68,68,1)]' : ''
+                      }`}
+                    >
+                      <td className="py-4 px-2">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedIds.includes(exp.id)} 
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedIds(orig => [...orig, exp.id]);
+                            else setSelectedIds(orig => orig.filter(id => id !== exp.id));
+                          }}
+                          className="w-4 h-4 text-indigo-600 rounded bg-gray-100 border-gray-300 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-4 px-4 text-gray-500 whitespace-nowrap">
+                        {new Date(exp.date).toISOString().split('T')[0]}
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className={`px-3 py-1 text-xs font-semibold rounded-full whitespace-nowrap ${getCatClass(exp.category)}`}>
+                          {exp.category}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 font-medium text-gray-700 max-w-[200px] truncate" title={exp.title}>{exp.title}</td>
+                      <td className="py-4 px-4 text-right font-semibold text-gray-800">{fmt(exp.amount)}</td>
+                      <td className="py-4 px-4 text-center">
+                        <button 
+                          onClick={() => handleSingleDelete(exp.id)}
+                          className="text-red-400 hover:text-red-600 transition p-2 rounded-full hover:bg-red-50"
+                          title="Delete"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                             <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {expenses.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center text-gray-400 py-10 mt-10">
+                   <p>No transactions available</p>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-gradient-to-r from-indigo-500 to-blue-500 rounded-xl p-6 text-white flex justify-between items-center mt-6 w-full shadow-lg shrink-0">
+               <div>
+                 <p className="text-sm text-indigo-100 mb-1">Total Transactions</p>
+                 <p className="text-3xl font-bold">{expenses.length}</p>
+               </div>
+               <div className="text-right">
+                 <p className="text-sm text-indigo-100 mb-1">Total Amount</p>
+                 <p className="text-3xl font-bold">{fmt(expenses.reduce((s, e) => s + e.amount, 0))}</p>
+               </div>
+            </div>
+            
+            <style>{`
+              @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+            `}</style>
+          </div>
+        ) : (
+        <div className="p-6 space-y-5" style={{ animation: 'fadeIn 0.4s ease-in-out' }}>
           {/* Top cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
@@ -237,23 +364,46 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        )}
       </main>
 
       {/* Action buttons */}
       <div className={`fixed bottom-6 transition-all duration-300 flex gap-3 ${collapsed ? "left-20" : "left-56"}`}>
-        <button
-          onClick={() => setShowModal(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl font-semibold shadow-lg text-sm flex items-center gap-2 transition"
-        >
-          + Add Expense
-        </button>
-        {expenses.length > 0 && (
-          <button
-            onClick={handleDeleteAll}
-            className="bg-white hover:bg-red-50 text-red-500 border border-red-200 px-4 py-3 rounded-xl font-semibold shadow-lg text-sm transition"
-          >
-            🗑 Delete All
-          </button>
+        {isDeleteView ? (
+          <>
+            <button
+              onClick={handleDeleteSelected}
+              className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-6 py-3 rounded-xl font-semibold shadow-xl text-sm transition flex items-center gap-2 border border-red-500"
+            >
+              Delete Selected Transactions
+            </button>
+            <button
+              onClick={() => { setIsDeleteView(false); setSelectedIds([]); }}
+              className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 px-6 py-3 rounded-xl font-semibold shadow-lg text-sm transition flex items-center"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setShowModal(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl font-semibold shadow-lg text-sm flex items-center gap-2 transition"
+            >
+              + Add Expense
+            </button>
+            {expenses.length > 0 && (
+              <button
+                onClick={() => setIsDeleteView(true)}
+                className="bg-[#1e293b] hover:bg-[#0f172a] text-white border border-gray-700 px-4 py-3 rounded-xl font-semibold shadow-lg text-sm transition flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete Transactions
+              </button>
+            )}
+          </>
         )}
       </div>
 
