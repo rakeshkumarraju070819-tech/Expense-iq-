@@ -1,6 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
+import AddFundsModal from "../components/AddFundsModal";
+import AdjustGoalModal from "../components/AdjustGoalModal";
+import SavingsGoalModal from "../components/SavingsGoalModal";
+import GoalSelectorModal from "../components/GoalSelectorModal";
+import { getSavingsGoals, createSavingsGoal, updateSavingsGoal, addContribution } from "../api/savingsGoal.api";
 
 // ── Local storage helper for persisting states ──────────────────────────────
 const getStoreKey = (userId) => `expenseiq_emergency_${userId}`;
@@ -44,23 +49,72 @@ export default function EmergencyFund() {
     if (user?.id) saveEmergencyData(user.id, { currentBalance: bal, targetGoal: goal, monthlyContribution: cont });
   };
 
-  const handleAddFunds = () => {
-    const amountStr = prompt("Enter amount to add:", "0");
-    if (!amountStr) return;
-    const amount = parseFloat(amountStr);
-    if (!isNaN(amount) && amount > 0) {
-      persist(currentBalance + amount, targetGoal, monthlyContribution);
+  const [showAddFundsModal, setShowAddFundsModal] = useState(false);
+  const [showAdjustGoalModal, setShowAdjustGoalModal] = useState(false);
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [showGoalSelectorModal, setShowGoalSelectorModal] = useState(false);
+  const [savingsGoals, setSavingsGoals] = useState([]);
+  const [savingsGoal, setSavingsGoal] = useState(null);
+
+  const loadGoals = useCallback(async () => {
+    try {
+      const res = await getSavingsGoals();
+      const goals = res.goals || [];
+      setSavingsGoals(goals);
+      const active = goals.length > 0 ? goals[0] : null;
+      setSavingsGoal(active);
+      if (active) {
+        setCurrentBalance(active.savedAmount || 0);
+        setTargetGoal(active.targetAmount || 0);
+        setMonthlyContribution(active.monthlySavingTarget || 0);
+      } else if (user?.id) {
+        const data = loadEmergencyData(user.id);
+        setCurrentBalance(data.currentBalance || 0);
+        setTargetGoal(data.targetGoal || 0);
+        setMonthlyContribution(data.monthlyContribution || 5000);
+      }
+    } catch { /* ignore */ }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (user?.id) loadGoals();
+  }, [user?.id, loadGoals]);
+
+  const handleAddFunds = useCallback(async (goalId, data) => {
+    try {
+      await addContribution(goalId, data);
+      await loadGoals();
+    } catch (err) { console.error("Failed to add funds:", err); }
+    setShowAddFundsModal(false);
+  }, [loadGoals]);
+
+  const handleAdjustGoal = useCallback(async (data) => {
+    if (!savingsGoal?._id) return;
+    try {
+      await updateSavingsGoal(savingsGoal._id, data);
+      await loadGoals();
+    } catch (err) { console.error("Failed to adjust goal:", err); }
+    setShowAdjustGoalModal(false);
+  }, [savingsGoal, loadGoals]);
+
+  const handleAdjustGoalClick = () => {
+    if (savingsGoals.length === 0) {
+      setShowGoalModal(true);
+    } else if (savingsGoals.length === 1) {
+      setSavingsGoal(savingsGoals[0]);
+      setShowAdjustGoalModal(true);
+    } else {
+      setShowGoalSelectorModal(true);
     }
   };
 
-  const handleAdjustGoal = () => {
-    const goalStr = prompt("Enter new target goal (e.g. 150000):", targetGoal);
-    if (!goalStr) return;
-    const goal = parseFloat(goalStr);
-    if (!isNaN(goal) && goal >= 0) {
-      persist(currentBalance, goal, monthlyContribution);
-    }
-  };
+  const handleCreateGoal = useCallback(async (goalData) => {
+    try {
+      await createSavingsGoal(goalData);
+      await loadGoals();
+    } catch (err) { console.error("Failed to create goal:", err); }
+    setShowGoalModal(false);
+  }, [loadGoals]);
 
   const monthlyExpenses = user?.monthlyBudget || 25000;
   
@@ -175,18 +229,18 @@ export default function EmergencyFund() {
            </div>
         </div>
 
-        {/* Quick Actions */}
+         {/* Quick Actions */}
         <div className="bg-white rounded-[1.25rem] p-6 shadow-sm border border-gray-100/50">
            <h2 className="text-[15px] font-bold text-gray-800 tracking-tight mb-5">Quick Actions</h2>
            <div className="flex flex-col sm:flex-row gap-4">
               <button 
-                onClick={handleAddFunds}
+                onClick={() => savingsGoals.length > 0 ? setShowAddFundsModal(true) : setShowGoalModal(true)}
                 className="flex-1 bg-[#1fc69c] hover:bg-[#1bb890] text-white py-3 rounded-xl font-bold text-[13px] shadow-md shadow-emerald-100 transition flex justify-center items-center gap-2"
               >
                 + Add Funds
               </button>
               <button
-                onClick={handleAdjustGoal}
+                onClick={handleAdjustGoalClick}
                 className="flex-1 bg-white hover:bg-gray-50 border border-gray-200 text-gray-600 py-3 rounded-xl font-bold text-[13px] transition flex justify-center items-center gap-2 shadow-sm"
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
@@ -195,6 +249,41 @@ export default function EmergencyFund() {
            </div>
         </div>
 
+        {showAddFundsModal && (
+          <AddFundsModal
+            goals={savingsGoals}
+            onSubmit={handleAddFunds}
+            onClose={() => setShowAddFundsModal(false)}
+          />
+        )}
+
+        {showAdjustGoalModal && savingsGoal && (
+          <AdjustGoalModal
+            goal={savingsGoal}
+            onSubmit={handleAdjustGoal}
+            onClose={() => setShowAdjustGoalModal(false)}
+          />
+        )}
+
+        {showGoalModal && (
+          <SavingsGoalModal
+            onSave={handleCreateGoal}
+            onClose={() => setShowGoalModal(false)}
+            existingGoal={null}
+          />
+        )}
+
+        {showGoalSelectorModal && (
+          <GoalSelectorModal
+            goals={savingsGoals}
+            onSelect={(selected) => {
+              setSavingsGoal(selected);
+              setShowGoalSelectorModal(false);
+              setShowAdjustGoalModal(true);
+            }}
+            onClose={() => setShowGoalSelectorModal(false)}
+          />
+        )}
       </main>
     </div>
   );
