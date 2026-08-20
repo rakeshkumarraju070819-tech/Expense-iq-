@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { registerWithPassword, googleLogin, sendOTP, verifyOTP } from "../api/auth.api";
-import { AuthCard, Logo, GoogleBtn, Divider, PhoneInput, OTPInput } from "../components/ui";
-import GoogleAccountPicker from "../components/GoogleAccountPicker";
+import { AuthCard, Logo, Divider, PhoneInput, OTPInput } from "../components/ui";
+import { GoogleLogin } from "@react-oauth/google";
 
 const EyeOpen = () => (
   <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -19,17 +19,19 @@ const EyeOff = () => (
 
 export default function SignUpPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
 
+  const googlePrefilledEmail = location.state?.googleEmail || "";
+  const isGoogleEmail = !!googlePrefilledEmail;
+
   const [name, setName]                 = useState("");
-  const [email, setEmail]               = useState("");
+  const [email, setEmail]               = useState(googlePrefilledEmail);
   const [password, setPassword]         = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [phone, setPhone]               = useState("");
   const [country, setCountry]           = useState("+91");
   const [loading, setLoading]           = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [showGooglePicker, setShowGooglePicker] = useState(false);
   const [error, setError]               = useState("");
 
   // OTP flow states
@@ -167,29 +169,22 @@ export default function SignUpPage() {
   };
 
   // ── Google sign-up ────────────────────────────────────────────────────────────
-  const handleGoogleSelect = async (account) => {
-    setShowGooglePicker(false);
-    setError("");
-    setGoogleLoading(true);
+  const handleGoogleSuccess = async (credentialResponse) => {
     try {
-      const data = await googleLogin({
-        googleId: account.googleId,
-        name: account.name,
-        email: account.email,
-        avatar: account.avatar,
-      });
-
-      if (!data?.success) {
+      const data = await googleLogin({ credential: credentialResponse.credential });
+      if (data?.success) {
+        if (data.exists) {
+          login(data.token, data.user);
+          navigate("/dashboard");
+        } else {
+          // It's a new account, pre-fill email
+          setEmail(data.email);
+        }
+      } else {
         setError(data?.message || "Google sign-up failed. Try again.");
-        return;
       }
-
-      login(data.token, data.user);
-      navigate("/dashboard");
     } catch (err) {
       setError(err?.response?.data?.message || "Google sign-up failed. Try again.");
-    } finally {
-      setGoogleLoading(false);
     }
   };
 
@@ -204,12 +199,14 @@ export default function SignUpPage() {
           {/* Email display and edit option */}
           <div className="bg-indigo-50 rounded-xl p-4 text-center mb-6">
             <p className="text-sm text-gray-700 font-semibold">{maskEmail(email)}</p>
-            <button
-              onClick={() => { setShowOTP(false); setOtp(""); setError(""); }}
-              className="text-indigo-500 text-xs font-semibold hover:underline mt-1 block w-full text-center"
-            >
-              Change email
-            </button>
+            {!isGoogleEmail && (
+              <button
+                onClick={() => { setShowOTP(false); setOtp(""); setError(""); }}
+                className="text-indigo-500 text-xs font-semibold hover:underline mt-1 block w-full text-center"
+              >
+                Change email
+              </button>
+            )}
           </div>
 
           <p className="text-sm font-semibold text-gray-700 text-center mb-4">Enter 6-Digit OTP</p>
@@ -263,11 +260,21 @@ export default function SignUpPage() {
         <h1 className="text-2xl font-bold text-gray-800 text-center mb-1">Create Your Account</h1>
         <p className="text-sm text-gray-400 text-center mb-6">Join ExpenseIQ to manage your finances</p>
 
-        <GoogleBtn
-          onClick={() => { setError(""); setShowGooglePicker(true); }}
-          loading={googleLoading}
-        />
-        <Divider label="or sign up with details" />
+        {!isGoogleEmail && (
+          <>
+            <div className="flex justify-center mb-6">
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={() => {
+                  setError("Google authentication failed");
+                }}
+                text="signup_with"
+                width="100%"
+              />
+            </div>
+            <Divider label="or sign up with details" />
+          </>
+        )}
 
         {/* Full Name */}
         <label className="text-sm font-medium text-gray-600 mb-2 block">Full Name</label>
@@ -281,13 +288,21 @@ export default function SignUpPage() {
         />
 
         {/* Email */}
-        <label className="text-sm font-medium text-gray-600 mb-2 block">Email Address</label>
+        <label className="text-sm font-medium text-gray-600 mb-2 flex items-center gap-2">
+          Email Address
+          {isGoogleEmail && (
+            <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full font-semibold">
+              Verified by Google
+            </span>
+          )}
+        </label>
         <input
           type="email"
           placeholder="Enter your email address"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="input-field mb-4"
+          onChange={(e) => !isGoogleEmail && setEmail(e.target.value)}
+          readOnly={isGoogleEmail}
+          className={`input-field mb-4 ${isGoogleEmail ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`}
           autoComplete="email"
         />
 
@@ -332,7 +347,7 @@ export default function SignUpPage() {
           className="btn-primary mt-4"
         >
           {loading ? (
-            <span className="flex items-center gap-2">
+            <span className="flex items-center gap-2 justify-center">
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               Sending OTP...
             </span>
@@ -347,10 +362,6 @@ export default function SignUpPage() {
           By continuing, you agree to our Terms of Service and Privacy Policy
         </p>
       </AuthCard>
-
-      {showGooglePicker && (
-        <GoogleAccountPicker onSelect={handleGoogleSelect} onClose={() => setShowGooglePicker(false)} />
-      )}
     </>
   );
 }

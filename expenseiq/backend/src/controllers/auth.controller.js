@@ -1,6 +1,7 @@
 const jwt  = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
+const { OAuth2Client } = require("google-auth-library");
 const User = require("../models/user.model");
 const EmailVerification = require("../models/emailVerification.model");
 const { sendEmail } = require("../utils/sendEmail");
@@ -10,6 +11,8 @@ const signToken = (userId) =>
   jwt.sign({ id: userId }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   });
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // ── POST /api/auth/register ───────────────────────────────────────────────────
 exports.register = async (req, res, next) => {
@@ -45,7 +48,7 @@ exports.register = async (req, res, next) => {
     const user = await User.create({
       name,
       email: normalizedEmail,
-      username: normalizedEmail, // Use email as the username
+      username: normalizedEmail,
       password: hashedPassword,
       phone,
       emailVerified: true
@@ -71,7 +74,6 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "username and password are required" });
     }
 
-    // Support logging in with either username or email
     const user = await User.findOne({
       $or: [
         { username: username.trim().toLowerCase() },
@@ -100,14 +102,12 @@ exports.sendOTP = async (req, res, next) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Basic email validation regex
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(normalizedEmail)) {
       return res.status(400).json({ success: false, message: "Please enter a valid email address" });
     }
 
     console.log(`[sendOTP] Registration request received for: ${normalizedEmail}`);
-    console.log(`[sendOTP] Checking if user already exists...`);
     const exists = await User.findOne({ email: normalizedEmail });
     if (exists) {
       return res.status(400).json({ success: false, message: "Email is already registered" });
@@ -116,9 +116,8 @@ exports.sendOTP = async (req, res, next) => {
     console.log(`[sendOTP] Generating OTP...`);
     const otp = crypto.randomInt(100000, 1000000).toString();
     const otpHash = await bcrypt.hash(otp, 10);
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiration
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    console.log(`[sendOTP] Storing temporary OTP securely...`);
     await EmailVerification.findOneAndUpdate(
       { email: normalizedEmail },
       { otpHash, expiresAt, attempts: 0, isVerified: false },
@@ -194,7 +193,6 @@ exports.verifyOTP = async (req, res, next) => {
     }
 
     console.log(`[verifyOTP] OTP verification successful for: ${normalizedEmail}`);
-    // Mark as verified and extend lifetime so they can complete the registration api call (e.g. 15 minutes)
     verificationRecord.isVerified = true;
     verificationRecord.expiresAt = new Date(Date.now() + 15 * 60 * 1000);
     await verificationRecord.save();
@@ -206,26 +204,67 @@ exports.verifyOTP = async (req, res, next) => {
 };
 
 // ── POST /api/auth/google ─────────────────────────────────────────────────────
+// Verifies Google ID token server-side, then checks if user exists in MongoDB.
+// If exists → login. If not → return exists:false so frontend redirects to signup.
 exports.googleLogin = async (req, res, next) => {
   try {
-    const { googleId, name, email, avatar } = req.body;
-    if (!googleId || !name || !email) {
-      return res.status(400).json({ success: false, message: "googleId, name and email are required" });
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ success: false, message: "Google credential is required" });
     }
 
-    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+    // Verify the Google ID token
+    let ticket;
+    try {
+      ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+    } catch (verifyErr) {
+      console.error("[googleLogin] Google token verification failed:", verifyErr.message);
+      return res.status(401).json({ success: false, message: "Google authentication failed. Please try again." });
+    }
+
+    const payload = ticket.getPayload();
+    const googleId = payload.sub;
+    const email = payload.email.toLowerCase().trim();
+    const name = payload.name || "";
+    const avatar = payload.picture || null;
+
+    console.log(`[googleLogin] Google identity verified for: ${email}`);
+
+    // Check if user exists in MongoDB
+    const user = await User.findOne({ email });
+
     if (user) {
-      user.googleId = googleId;
-      user.name     = name;
-      user.avatar   = avatar || user.avatar;
-      await user.save();
+      // ── Existing user → Login ───────────────────────────────────────────
+      console.log(`[googleLogin] User found in MongoDB. Logging in.`);
+      if (!user.googleId) {
+        user.googleId = googleId;
+        await user.save();
+      }
+      const token = signToken(user._id);
+      return res.json({ success: true, exists: true, token, user });
     } else {
-      user = await User.create({ googleId, name, email, username: email, avatar, emailVerified: true });
+      // ── New user → Redirect to signup ───────────────────────────────────
+      console.log(`[googleLogin] User NOT found in MongoDB. Redirecting to signup.`);
+      return res.json({
+        success: true,
+        exists: false,
+        message: "Account not found. Please create an account.",
+        redirect: "/signup",
+        email,
+        name,
+        avatar,
+      });
     }
-
-    const token = signToken(user._id);
-    res.json({ success: true, token, user });
-  } catch (err) { next(err); }
+  } catch (err) {
+    console.error("[googleLogin] Server error:", err.message);
+    if (err.name === "MongoServerError" || err.name === "MongooseError" || err.name === "MongoError") {
+      return res.status(500).json({ success: false, message: "Unable to check your account right now. Please try again later." });
+    }
+    next(err);
+  }
 };
 
 // ── GET /api/auth/me ──────────────────────────────────────────────────────────

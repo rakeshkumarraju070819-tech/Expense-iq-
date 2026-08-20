@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { useAuth, getLocalUsers, makeToken } from "../context/AuthContext";
-import { AuthCard, Logo, GoogleBtn, Divider } from "../components/ui";
-import GoogleAccountPicker from "../components/GoogleAccountPicker";
+import { useAuth } from "../context/AuthContext";
+import { loginWithPassword, googleLogin } from "../api/auth.api";
+import { AuthCard, Logo, Divider } from "../components/ui";
+import { GoogleLogin } from "@react-oauth/google";
 
 const EyeOpen = () => (
   <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -24,52 +25,46 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [showGooglePicker, setShowGooglePicker] = useState(false);
   const [error, setError] = useState("");
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!username.trim()) { setError("Please enter your username"); return; }
     if (!password) { setError("Please enter your password"); return; }
     setError("");
     setLoading(true);
 
-    setTimeout(() => {
-      const users = getLocalUsers();
-      const found = users.find(
-        (u) => u.username === username.trim().toLowerCase() && u.password === password
-      );
+    try {
+      const data = await loginWithPassword(username.trim(), password);
+      if (data?.success) {
+        login(data.token, data.user);
+        navigate("/dashboard");
+      } else {
+        setError(data?.message || "Invalid credentials");
+      }
+    } catch (err) {
+      setError(err?.response?.data?.message || "Login failed");
+    } finally {
       setLoading(false);
-      if (!found) { setError("Invalid username or password."); return; }
-      const { password: _pw, ...safeUser } = found;
-      login(makeToken(found.id), safeUser);
-      navigate("/dashboard");
-    }, 600);
+    }
   };
 
-  const handleGoogleSelect = (account) => {
-    setShowGooglePicker(false);
-    const users = getLocalUsers();
-    let existing = users.find(
-      (u) => u.googleId === account.googleId || u.email === account.email
-    );
-    if (!existing) {
-      existing = {
-        id: "g_" + Date.now(),
-        name: account.name,
-        email: account.email,
-        googleId: account.googleId,
-        avatar: account.avatar,
-        color: account.color,
-        username: account.email.split("@")[0],
-        monthlyBudget: 10000,
-        dailyBudget: 400,
-      };
-      users.push(existing);
-      localStorage.setItem("expenseiq_users", JSON.stringify(users));
+  const handleGoogleSuccess = async (credentialResponse) => {
+    try {
+      const data = await googleLogin({ credential: credentialResponse.credential });
+      if (data?.success) {
+        if (data.exists) {
+          login(data.token, data.user);
+          navigate("/dashboard");
+        } else {
+          // Account doesn't exist -> Redirect to signup
+          navigate("/signup", { state: { googleEmail: data.email } });
+        }
+      } else {
+        setError(data?.message || "Google login failed");
+      }
+    } catch (err) {
+      setError(err?.response?.data?.message || "Google login failed");
     }
-    const { password: _pw, ...safeUser } = existing;
-    login(makeToken(existing.id), safeUser);
-    navigate("/dashboard");
   };
 
   return (
@@ -79,13 +74,23 @@ export default function LoginPage() {
         <h1 className="text-2xl font-bold text-gray-800 text-center mb-1">Login to Your Account</h1>
         <p className="text-sm text-gray-400 text-center mb-6">Welcome back to ExpenseIQ</p>
 
-        <GoogleBtn onClick={() => { setError(""); setShowGooglePicker(true); }} />
+        <div className="flex justify-center mb-6">
+          <GoogleLogin
+            onSuccess={handleGoogleSuccess}
+            onError={() => {
+              setError("Google authentication failed");
+            }}
+            text="continue_with"
+            width="100%"
+          />
+        </div>
+        
         <Divider label="or login with credentials" />
 
-        <label className="text-sm font-medium text-gray-600 mb-2 block">Username</label>
+        <label className="text-sm font-medium text-gray-600 mb-2 block">Username or Email</label>
         <input
           type="text"
-          placeholder="Enter your username"
+          placeholder="Enter your username or email"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleLogin()}
@@ -129,7 +134,7 @@ export default function LoginPage() {
           className="btn-primary"
         >
           {loading ? (
-            <span className="flex items-center gap-2">
+            <span className="flex items-center gap-2 justify-center">
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               Logging in...
             </span>
@@ -144,10 +149,7 @@ export default function LoginPage() {
           By continuing, you agree to our Terms of Service and Privacy Policy
         </p>
       </AuthCard>
-
-      {showGooglePicker && (
-        <GoogleAccountPicker onSelect={handleGoogleSelect} onClose={() => setShowGooglePicker(false)} />
-      )}
     </>
   );
 }
+
