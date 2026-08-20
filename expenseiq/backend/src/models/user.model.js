@@ -9,6 +9,7 @@ const userSchema = new mongoose.Schema(
     email: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
     googleId: { type: String, unique: true, sparse: true },
     avatar: { type: String, default: null },
+    emailVerified: { type: Boolean, default: false },
     isPremium: { type: Boolean, default: false },
     monthlyBudget: { type: Number, default: 10000 },
     dailyBudget: { type: Number, default: 400 },

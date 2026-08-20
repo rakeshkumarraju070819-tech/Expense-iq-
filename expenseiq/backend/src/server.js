@@ -7,7 +7,6 @@ require("dotenv").config();
 const authRoutes = require("./routes/auth.routes");
 const expenseRoutes = require("./routes/expense.routes");
 const userRoutes = require("./routes/user.routes");
-const savingsGoalRoutes = require("./routes/savingsGoal.routes");
 const { errorHandler } = require("./middleware/error.middleware");
 
 const app = express();
@@ -22,7 +21,6 @@ app.use(morgan("dev"));
 app.use("/api/auth", authRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/savings-goals", savingsGoalRoutes);
 
 app.get("/api/health", (req, res) => res.json({ status: "ok", message: "ExpenseIQ API running" }));
 

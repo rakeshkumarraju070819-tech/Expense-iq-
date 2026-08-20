@@ -1,19 +1,19 @@
 import api from "./axios";
 
 // ── OTP flow (used from SignUp → OTP page if needed) ──────────────────────────
-export const sendOTP = (phone, name) =>
-  api.post("/auth/send-otp", { phone, name }).then((r) => r.data);
+export const sendOTP = (email) =>
+  api.post("/auth/send-otp", { email }).then((r) => r.data);
 
-export const verifyOTP = (phone, otp) =>
-  api.post("/auth/verify-otp", { phone, otp }).then((r) => r.data);
+export const verifyOTP = (email, otp) =>
+  api.post("/auth/verify-otp", { email, otp }).then((r) => r.data);
 
 // ── Username + Password login ─────────────────────────────────────────────────
 export const loginWithPassword = (username, password) =>
   api.post("/auth/login", { username, password }).then((r) => r.data);
 
-// ── Username + Password register (with phone) ─────────────────────────────────
-export const registerWithPassword = ({ name, username, password, phone }) =>
-  api.post("/auth/register", { name, username, password, phone }).then((r) => r.data);
+// ── Username + Password register (with phone & email) ─────────────────────────
+export const registerWithPassword = ({ name, email, password, phone }) =>
+  api.post("/auth/register", { name, email, password, phone }).then((r) => r.data);
 
 // ── Google OAuth ──────────────────────────────────────────────────────────────
 export const googleLogin = (payload) =>

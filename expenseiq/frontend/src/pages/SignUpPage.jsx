@@ -1,129 +1,356 @@
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { registerWithPassword, googleLogin, sendOTP, verifyOTP } from "../api/auth.api";
+import { AuthCard, Logo, GoogleBtn, Divider, PhoneInput, OTPInput } from "../components/ui";
+import GoogleAccountPicker from "../components/GoogleAccountPicker";
 
-const CLIENT_ID =
-  "705346478351-sutam8cssaiqc2cp2jaqu1m3fnvkqe15.apps.googleusercontent.com";
+const EyeOpen = () => (
+  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+  </svg>
+);
+const EyeOff = () => (
+  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+  </svg>
+);
 
-export default function GoogleAccountPicker({ onSelect, onClose }) {
-  // Lock body scroll while overlay is shown
+export default function SignUpPage() {
+  const navigate = useNavigate();
+  const { login } = useAuth();
+
+  const [name, setName]                 = useState("");
+  const [email, setEmail]               = useState("");
+  const [password, setPassword]         = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [phone, setPhone]               = useState("");
+  const [country, setCountry]           = useState("+91");
+  const [loading, setLoading]           = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [showGooglePicker, setShowGooglePicker] = useState(false);
+  const [error, setError]               = useState("");
+
+  // OTP flow states
+  const [showOTP, setShowOTP]           = useState(false);
+  const [otp, setOtp]                   = useState("");
+  const [seconds, setSeconds]           = useState(0);
+  const [verifying, setVerifying]       = useState(false);
+  const [resending, setResending]       = useState(false);
+
+  // Countdown timer for Resend OTP
   useEffect(() => {
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, []);
+    if (seconds <= 0) return;
+    const t = setTimeout(() => setSeconds((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [seconds]);
 
-  // Trigger real Google OAuth as soon as the component mounts
-  useEffect(() => {
-    const startOAuth = () => {
-      const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: "openid profile email",
-        callback: async (tokenResponse) => {
-          if (tokenResponse.error) {
-            onClose();
-            return;
-          }
-          try {
-            // Fetch real user profile from Google
-            const res = await fetch(
-              "https://www.googleapis.com/oauth2/v3/userinfo",
-              {
-                headers: {
-                  Authorization: `Bearer ${tokenResponse.access_token}`,
-                },
-              }
-            );
-            const profile = await res.json();
-            const initials = profile.name
-              .split(" ")
-              .map((n) => n[0])
-              .join("")
-              .toUpperCase()
-              .slice(0, 2);
-            onSelect({
-              googleId: profile.sub,
-              name: profile.name,
-              email: profile.email,
-              avatar: initials,
-              color: "#4285F4",
-            });
-          } catch {
-            onClose();
-          }
-        },
-      });
-      client.requestAccessToken();
-    };
+  const fullPhone = country + phone;
+  const canSubmit = name.trim() && email.trim() && password.length >= 6 && phone.length === 10 && !loading;
 
-    if (window.google?.accounts?.oauth2) {
-      startOAuth();
-    } else {
-      // GSI script not loaded yet — poll until ready
-      const interval = setInterval(() => {
-        if (window.google?.accounts?.oauth2) {
-          clearInterval(interval);
-          startOAuth();
-        }
-      }, 100);
-      return () => clearInterval(interval);
+  // Mask email for user privacy
+  const maskEmail = (val) => {
+    const parts = val.split("@");
+    if (parts.length !== 2) return val;
+    const n = parts[0];
+    const d = parts[1];
+    return n[0] + "*".repeat(Math.max(n.length - 1, 5)) + "@" + d;
+  };
+
+  // ── Step 1: Request OTP ──────────────────────────────────────────────────────
+  const handleSignUp = async () => {
+    if (!name.trim())        { setError("Please enter your full name"); return; }
+    if (!email.trim())       { setError("Please enter your email address"); return; }
+    
+    // Basic email format check
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError("Please enter a valid email address");
+      return;
     }
-  }, [onSelect, onClose]);
+    
+    if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (phone.length !== 10) { setError("Enter a valid 10-digit phone number"); return; }
 
-  // Loading overlay while the Google popup is opening
+    setError("");
+    setLoading(true);
+    try {
+      console.log("[SignUpPage] Requesting OTP send...");
+      const data = await sendOTP(email.trim().toLowerCase());
+      if (data?.success) {
+        console.log("[SignUpPage] OTP sent successfully");
+        setShowOTP(true);
+        setSeconds(30);
+      } else {
+        setError(data?.message || "Unable to send OTP. Please try again.");
+      }
+    } catch (err) {
+      console.error("[SignUpPage] OTP request failed:", err);
+      const msg = err?.response?.data?.message;
+      if (err?.code === "ERR_NETWORK") {
+        setError("Can't reach the server. Is the backend running?");
+      } else {
+        setError(msg || "Something went wrong. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Step 2: Verify OTP + Register Account ─────────────────────────
+  const handleVerifyOTP = async () => {
+    if (otp.length < 6) {
+      setError("Please enter the 6-digit OTP");
+      return;
+    }
+
+    setError("");
+    setVerifying(true);
+    try {
+      console.log("[SignUpPage] Verifying OTP...");
+      const verifyRes = await verifyOTP(email.trim().toLowerCase(), otp);
+      if (!verifyRes?.success) {
+        setError(verifyRes?.message || "Invalid OTP");
+        setOtp(""); // Clear incorrect OTP
+        setVerifying(false);
+        return;
+      }
+
+      console.log("[SignUpPage] OTP verified successfully. Completing account registration...");
+      const regRes = await registerWithPassword({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+        phone: fullPhone,
+      });
+
+      if (!regRes?.success) {
+        setError(regRes?.message || "Could not create account. Try again.");
+        setVerifying(false);
+        return;
+      }
+
+      console.log("[SignUpPage] Account created successfully");
+      login(regRes.token, regRes.user);
+      navigate("/dashboard");
+    } catch (err) {
+      console.error("[SignUpPage] Verification/registration failed:", err);
+      const msg = err?.response?.data?.message;
+      setError(msg || "Something went wrong. Please try again.");
+      setOtp(""); // Clear incorrect OTP on failure
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  // ── Step 3: Resend OTP ───────────────────────────────────────────────────────
+  const handleResendOTP = async () => {
+    setResending(true);
+    setError("");
+    try {
+      console.log("[SignUpPage] Resending OTP...");
+      const data = await sendOTP(email.trim().toLowerCase());
+      if (data?.success) {
+        console.log("[SignUpPage] OTP resent successfully");
+        setSeconds(30);
+        setOtp("");
+      } else {
+        setError(data?.message || "Failed to resend OTP.");
+      }
+    } catch (err) {
+      console.error("[SignUpPage] Resend OTP failed:", err);
+      setError(err?.response?.data?.message || "Failed to resend OTP.");
+    } finally {
+      setResending(false);
+    }
+  };
+
+  // ── Google sign-up ────────────────────────────────────────────────────────────
+  const handleGoogleSelect = async (account) => {
+    setShowGooglePicker(false);
+    setError("");
+    setGoogleLoading(true);
+    try {
+      const data = await googleLogin({
+        googleId: account.googleId,
+        name: account.name,
+        email: account.email,
+        avatar: account.avatar,
+      });
+
+      if (!data?.success) {
+        setError(data?.message || "Google sign-up failed. Try again.");
+        return;
+      }
+
+      login(data.token, data.user);
+      navigate("/dashboard");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Google sign-up failed. Try again.");
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  if (showOTP) {
+    return (
+      <>
+        <AuthCard>
+          <Logo />
+          <h1 className="text-2xl font-bold text-gray-800 text-center mb-1">Verify Your Email</h1>
+          <p className="text-sm text-gray-400 text-center mb-6">We've sent a 6-digit OTP to</p>
+
+          {/* Email display and edit option */}
+          <div className="bg-indigo-50 rounded-xl p-4 text-center mb-6">
+            <p className="text-sm text-gray-700 font-semibold">{maskEmail(email)}</p>
+            <button
+              onClick={() => { setShowOTP(false); setOtp(""); setError(""); }}
+              className="text-indigo-500 text-xs font-semibold hover:underline mt-1 block w-full text-center"
+            >
+              Change email
+            </button>
+          </div>
+
+          <p className="text-sm font-semibold text-gray-700 text-center mb-4">Enter 6-Digit OTP</p>
+          <OTPInput value={otp} onChange={setOtp} />
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mt-4">
+              <p className="text-red-500 text-sm text-center">{error}</p>
+            </div>
+          )}
+
+          {/* Resend Action */}
+          <p className="text-sm text-gray-400 text-center mt-6">
+            {seconds > 0 ? (
+              <>
+                Didn't receive the code? Resend in{" "}
+                <span className="text-orange-400 font-semibold">{seconds}s</span>
+              </>
+            ) : (
+              <button
+                onClick={handleResendOTP}
+                disabled={resending}
+                className="text-indigo-500 font-semibold hover:underline disabled:opacity-50"
+              >
+                {resending ? "Resending..." : "Resend OTP"}
+              </button>
+            )}
+          </p>
+
+          <button
+            onClick={handleVerifyOTP}
+            disabled={otp.length < 6 || verifying}
+            className="btn-primary mt-6"
+          >
+            {verifying ? (
+              <span className="flex items-center gap-2 justify-center">
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Verifying...
+              </span>
+            ) : <>Verify OTP <span>→</span></>}
+          </button>
+        </AuthCard>
+      </>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <>
+      <AuthCard>
+        <Logo />
+        <h1 className="text-2xl font-bold text-gray-800 text-center mb-1">Create Your Account</h1>
+        <p className="text-sm text-gray-400 text-center mb-6">Join ExpenseIQ to manage your finances</p>
 
-      {/* Card */}
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-8 flex flex-col items-center gap-5">
-        {/* Google logo */}
-        <svg width="74" height="24" viewBox="0 0 74 24" fill="none">
-          <path
-            d="M9.24 8.19v2.46h5.88c-.18 1.38-.64 2.39-1.34 3.1-.86.86-2.2 1.8-4.54 1.8-3.62 0-6.45-2.92-6.45-6.54s2.83-6.54 6.45-6.54c1.95 0 3.38.77 4.43 1.76L15.4 2.5C13.94 1.08 11.98 0 9.24 0 4.28 0 .11 4.04.11 9s4.17 9 9.13 9c2.68 0 4.7-.88 6.28-2.52 1.62-1.62 2.13-3.91 2.13-5.75 0-.57-.04-1.1-.13-1.54H9.24z"
-            fill="#4285F4"
-          />
-          <path
-            d="M25 6.19c-3.21 0-5.83 2.44-5.83 5.81 0 3.34 2.62 5.81 5.83 5.81s5.83-2.46 5.83-5.81c0-3.37-2.62-5.81-5.83-5.81zm0 9.33c-1.76 0-3.28-1.45-3.28-3.52 0-2.09 1.52-3.52 3.28-3.52s3.28 1.43 3.28 3.52c0 2.07-1.52 3.52-3.28 3.52z"
-            fill="#EA4335"
-          />
-          <path
-            d="M53.58 7.49h-.09c-.57-.68-1.67-1.3-3.06-1.3C47.53 6.19 45 8.72 45 12c0 3.26 2.53 5.81 5.43 5.81 1.39 0 2.49-.62 3.06-1.32h.09v.81c0 2.22-1.19 3.41-3.1 3.41-1.56 0-2.53-1.12-2.93-2.07l-2.22.92c.64 1.54 2.33 3.43 5.15 3.43 2.99 0 5.52-1.76 5.52-6.05V6.49h-2.42v1zm-2.93 8.03c-1.76 0-3.1-1.5-3.1-3.52 0-2.05 1.34-3.52 3.1-3.52 1.74 0 3.1 1.49 3.1 3.54.01 2.03-1.36 3.5-3.1 3.5z"
-            fill="#4285F4"
-          />
-          <path
-            d="M38 6.19c-3.21 0-5.83 2.44-5.83 5.81 0 3.34 2.62 5.81 5.83 5.81s5.83-2.46 5.83-5.81c0-3.37-2.62-5.81-5.83-5.81zm0 9.33c-1.76 0-3.28-1.45-3.28-3.52 0-2.09 1.52-3.52 3.28-3.52s3.28 1.43 3.28 3.52c0 2.07-1.52 3.52-3.28 3.52z"
-            fill="#FBBC05"
-          />
-          <path d="M58.11 0h2.51v17.47h-2.51z" fill="#34A853" />
-          <path
-            d="M65.09 14.48c-.82 0-1.4-.37-1.78-1.1l4.91-2.03-.17-.41c-.31-.84-1.27-2.39-3.22-2.39-1.93 0-3.54 1.52-3.54 3.81 0 2.14 1.59 3.81 3.73 3.81 1.72 0 2.72-.95 3.14-1.5l-1.28-.85c-.43.63-1.01 1.05-1.79 1.05zm-.12-4.7c.66 0 1.22.33 1.41.81l-3.38 1.4c-.04-2.01 1.44-2.21 1.97-2.21z"
-            fill="#EA4335"
-          />
-        </svg>
+        <GoogleBtn
+          onClick={() => { setError(""); setShowGooglePicker(true); }}
+          loading={googleLoading}
+        />
+        <Divider label="or sign up with details" />
 
-        <div className="text-center">
-          <p className="text-sm font-semibold text-gray-800">
-            Opening Google sign-in…
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            Allow the pop-up if prompted by your browser
-          </p>
+        {/* Full Name */}
+        <label className="text-sm font-medium text-gray-600 mb-2 block">Full Name</label>
+        <input
+          type="text"
+          placeholder="Enter your full name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="input-field mb-4"
+          autoComplete="name"
+        />
+
+        {/* Email */}
+        <label className="text-sm font-medium text-gray-600 mb-2 block">Email Address</label>
+        <input
+          type="email"
+          placeholder="Enter your email address"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="input-field mb-4"
+          autoComplete="email"
+        />
+
+        {/* Password */}
+        <label className="text-sm font-medium text-gray-600 mb-2 block">Password</label>
+        <div className="relative mb-4">
+          <input
+            type={showPassword ? "text" : "password"}
+            placeholder="Create a password (min 6 chars)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="input-field pr-12"
+            autoComplete="new-password"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+          >
+            {showPassword ? <EyeOff /> : <EyeOpen />}
+          </button>
         </div>
 
-        {/* Spinner */}
-        <div className="w-8 h-8 border-4 border-blue-100 border-t-blue-500 rounded-full animate-spin" />
+        {/* Phone */}
+        <label className="text-sm font-medium text-gray-600 mb-2 block">Phone Number</label>
+        <PhoneInput
+          phone={phone}
+          onPhoneChange={setPhone}
+          country={country}
+          onCountryChange={setCountry}
+        />
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mt-3">
+            <p className="text-red-500 text-sm">{error}</p>
+          </div>
+        )}
 
         <button
-          onClick={onClose}
-          className="text-xs text-gray-400 hover:text-gray-600 transition"
+          onClick={handleSignUp}
+          disabled={!canSubmit}
+          className="btn-primary mt-4"
         >
-          Cancel
+          {loading ? (
+            <span className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              Sending OTP...
+            </span>
+          ) : <>Create Account <span>→</span></>}
         </button>
-      </div>
-    </div>
+
+        <p className="text-xs text-gray-400 text-center mt-4">
+          Already have an account?{" "}
+          <Link to="/login" className="text-indigo-500 font-semibold hover:underline">Login</Link>
+        </p>
+        <p className="text-xs text-gray-300 text-center mt-3">
+          By continuing, you agree to our Terms of Service and Privacy Policy
+        </p>
+      </AuthCard>
+
+      {showGooglePicker && (
+        <GoogleAccountPicker onSelect={handleGoogleSelect} onClose={() => setShowGooglePicker(false)} />
+      )}
+    </>
   );
 }

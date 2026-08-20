@@ -3,12 +3,12 @@ import { useAuth } from "../context/AuthContext";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: "⊞", path: "/dashboard" },
-  { id: "analitics", label: "Analytics", icon: "📊", path: "/analitics" },
-  { id: "calendar", label: "Calendar", icon: "📅", path: "/calendar" },
-  { id: "subscriptions", label: "Subscriptions", icon: "🔄", path: "/subscriptions" },
-  { id: "emergency", label: "Emergency Fund", icon: "🛡️", path: "/emergency" },
-  { id: "reminders", label: "Reminders", icon: "🔔", path: "/reminders" },
-  { id: "stocks", label: "Stock Assets", icon: "📈", path: "/stocks" },
+  { id: "analytics", label: "Analytics", icon: "📊", path: "/dashboard" },
+  { id: "calendar", label: "Calendar", icon: "📅", path: "/dashboard" },
+  { id: "subscriptions", label: "Subscriptions", icon: "🔄", path: "/dashboard" },
+  { id: "emergency", label: "Emergency Fund", icon: "🛡️", path: "/dashboard" },
+  { id: "reminders", label: "Reminders", icon: "🔔", path: "/dashboard" },
+  { id: "stocks", label: "Stock Assets", icon: "📈", path: "/dashboard" },
 ];
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -58,10 +58,9 @@ export default function Sidebar({ totalExpenses, collapsed, onToggle, onLogout }
       {/* Nav */}
       <nav className="flex-1 px-2 py-3 space-y-1">
         {NAV_ITEMS.map((item) => {
-          const active = location.pathname === item.path && (item.path === "/dashboard" ? item.id === "dashboard" : true);
+          const active = location.pathname === item.path && item.id === "dashboard";
           return (
-            <Link
-              to={item.path}
+            <button
               key={item.id}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
                 active
@@ -71,7 +70,7 @@ export default function Sidebar({ totalExpenses, collapsed, onToggle, onLogout }
             >
               <span className="text-base flex-shrink-0">{item.icon}</span>
               {!collapsed && <span>{item.label}</span>}
-            </Link>
+            </button>
           );
         })}
       </nav>
