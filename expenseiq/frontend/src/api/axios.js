@@ -1,7 +1,8 @@
 import axios from "axios";
 
+const defaultBaseUrl = import.meta.env.PROD ? "https://expense-iq-7o2i.onrender.com/api" : "/api";
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : "/api",
+  baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : defaultBaseUrl,
   headers: { "Content-Type": "application/json" },
 });
 
