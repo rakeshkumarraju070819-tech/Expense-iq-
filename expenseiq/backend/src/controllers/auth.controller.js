@@ -107,7 +107,7 @@ exports.sendOTP = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Please enter a valid email address" });
     }
 
-    console.log(`[sendOTP] Registration request received for: ${normalizedEmail}`);
+    console.log(`[sendOTP] Request received`);
     const exists = await User.findOne({ email: normalizedEmail });
     if (exists) {
       return res.status(400).json({ success: false, message: "Email is already registered" });
@@ -127,7 +127,7 @@ exports.sendOTP = async (req, res, next) => {
     const maskedEmail = normalizedEmail.replace(/^(.)(.*)(@.*)$/, (_, first, middle, domain) => {
       return first + "*".repeat(middle.length) + domain;
     });
-    console.log(`[sendOTP] Sending OTP to: ${maskedEmail}`);
+    console.log(`[sendOTP] Sending email through Resend`);
 
     try {
       await sendEmail({
@@ -151,10 +151,10 @@ exports.sendOTP = async (req, res, next) => {
           </div>
         `,
       });
-      console.log(`[sendOTP] OTP email sent successfully to: ${maskedEmail}`);
+      console.log(`[sendOTP] Email accepted by Resend`);
       return res.json({ success: true, message: "OTP sent successfully" });
     } catch (mailErr) {
-      console.error("❌ Nodemailer failed to send email:", mailErr.message);
+      console.error("[sendOTP] Failed to send email:", mailErr.message);
       return res.status(500).json({ success: false, message: "Unable to send OTP. Please try again." });
     }
   } catch (err) {
