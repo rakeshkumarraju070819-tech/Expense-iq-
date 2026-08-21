@@ -127,10 +127,11 @@ exports.sendOTP = async (req, res, next) => {
     const maskedEmail = normalizedEmail.replace(/^(.)(.*)(@.*)$/, (_, first, middle, domain) => {
       return first + "*".repeat(middle.length) + domain;
     });
-    console.log(`[sendOTP] Sending email through Brevo API`);
+    console.log(`[sendOTP] Sending OTP from: ${process.env.SMTP_FROM}`);
+    console.log(`[sendOTP] Sending OTP to: ${maskedEmail}`);
 
     try {
-      await sendEmail({
+      const info = await sendEmail({
         to: normalizedEmail,
         subject: "ExpenseIQ Email Verification OTP",
         html: `
@@ -151,10 +152,10 @@ exports.sendOTP = async (req, res, next) => {
           </div>
         `,
       });
-      console.log(`[sendOTP] Brevo accepted email`);
+      console.log(`[sendOTP] Email sent successfully: ${info.messageId}`);
       return res.json({ success: true, message: "OTP sent successfully" });
     } catch (mailErr) {
-      console.error("[sendOTP] Brevo email failed:", mailErr.message);
+      console.error("[sendOTP] Nodemailer email failed:", mailErr.message);
       return res.status(500).json({ success: false, message: "Unable to send OTP. Please try again." });
     }
   } catch (err) {
