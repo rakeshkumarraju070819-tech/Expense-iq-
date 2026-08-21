@@ -127,7 +127,7 @@ exports.sendOTP = async (req, res, next) => {
     const maskedEmail = normalizedEmail.replace(/^(.)(.*)(@.*)$/, (_, first, middle, domain) => {
       return first + "*".repeat(middle.length) + domain;
     });
-    console.log(`[sendOTP] Sending email through Resend`);
+    console.log(`[sendOTP] Sending email through Brevo API`);
 
     try {
       await sendEmail({
@@ -151,10 +151,10 @@ exports.sendOTP = async (req, res, next) => {
           </div>
         `,
       });
-      console.log(`[sendOTP] Email accepted by Resend`);
+      console.log(`[sendOTP] Brevo accepted email`);
       return res.json({ success: true, message: "OTP sent successfully" });
     } catch (mailErr) {
-      console.error("[sendOTP] Failed to send email:", mailErr.message);
+      console.error("[sendOTP] Brevo email failed:", mailErr.message);
       return res.status(500).json({ success: false, message: "Unable to send OTP. Please try again." });
     }
   } catch (err) {
